@@ -8,12 +8,20 @@ export default function Home() {
           <span className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
             QuoteForge
           </span>
-          <Link
-            href="/dashboard"
-            className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-          >
-            Go to dashboard
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/login"
+              className="text-sm font-medium text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-50"
+            >
+              Log in
+            </Link>
+            <Link
+              href="/signup"
+              className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
+            >
+              Sign up
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -27,10 +35,16 @@ export default function Home() {
         </p>
         <div className="mt-10 flex items-center gap-4">
           <Link
-            href="/dashboard"
+            href="/signup"
             className="rounded-md bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
           >
-            Go to dashboard
+            Get started
+          </Link>
+          <Link
+            href="/login"
+            className="rounded-md px-5 py-2.5 text-sm font-medium text-zinc-700 transition hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-zinc-50"
+          >
+            Log in
           </Link>
         </div>
       </main>
