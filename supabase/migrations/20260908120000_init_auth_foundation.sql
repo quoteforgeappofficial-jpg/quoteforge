@@ -128,6 +128,7 @@ as $$
   select business_id from public.profiles where id = auth.uid();
 $$;
 
+revoke execute on function public.current_business_id() from public;
 grant execute on function public.current_business_id() to authenticated;
 
 -- ---------------------------------------------------------------------
