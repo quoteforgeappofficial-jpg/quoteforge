@@ -25,6 +25,20 @@ function emptyRowMap(): Record<LineItemCategory, Row[]> {
   return { labor: [], materials: [], equipment: [], other: [] };
 }
 
+/**
+ * Strips awkward leading zeros ("025" -> "25") from a quantity/unit-cost
+ * field's raw input, without touching valid decimals ("0.5" stays "0.5")
+ * or a lone "0". This is a safety net alongside select-on-focus below —
+ * select-on-focus prevents the leading zero in the first place when a
+ * user clicks into a "0"/"1" default field, this catches any other path
+ * (paste, mobile keyboards that don't honor selection, etc.) that could
+ * still produce one. Purely a display-string transform; Number(...) is
+ * what all the actual arithmetic already runs through, unaffected.
+ */
+function normalizeNumericInput(raw: string): string {
+  return raw.replace(/^0+(?=\d)/, "");
+}
+
 export function LineItemsAndPricingFields({
   initialItems,
   initialMarkupType,
@@ -174,6 +188,18 @@ export function LineItemsAndPricingFields({
             </p>
           ) : (
             <div className="space-y-2">
+              {/* Column labels shown once per category, not per row — keeps
+                  each row compact while still making Qty/Unit cost clear on
+                  mobile, where a placeholder alone disappears once typed in. */}
+              <div
+                aria-hidden="true"
+                className="grid grid-cols-[1fr_4.5rem_5.5rem_auto] gap-2 px-0.5 text-xs font-medium text-zinc-500 dark:text-zinc-500"
+              >
+                <span>Description</span>
+                <span>Qty</span>
+                <span>Unit cost</span>
+                <span />
+              </div>
               {rowsByCategory[category].map((row) => (
                 <div
                   key={row.key}
@@ -195,8 +221,14 @@ export function LineItemsAndPricingFields({
                     min="0"
                     placeholder="Qty"
                     value={row.quantity}
+                    onFocus={(event) => event.target.select()}
                     onChange={(event) =>
-                      updateRow(category, row.key, "quantity", event.target.value)
+                      updateRow(
+                        category,
+                        row.key,
+                        "quantity",
+                        normalizeNumericInput(event.target.value),
+                      )
                     }
                     aria-label={`${LINE_ITEM_CATEGORY_LABELS[category]} item quantity`}
                     className={`${inputClass} px-2`}
@@ -207,8 +239,14 @@ export function LineItemsAndPricingFields({
                     min="0"
                     placeholder="$/unit"
                     value={row.unitCost}
+                    onFocus={(event) => event.target.select()}
                     onChange={(event) =>
-                      updateRow(category, row.key, "unitCost", event.target.value)
+                      updateRow(
+                        category,
+                        row.key,
+                        "unitCost",
+                        normalizeNumericInput(event.target.value),
+                      )
                     }
                     aria-label={`${LINE_ITEM_CATEGORY_LABELS[category]} item unit cost`}
                     className={`${inputClass} px-2`}
