@@ -66,6 +66,9 @@ create trigger customers_set_updated_at
 
 alter table public.customers enable row level security;
 
+drop policy if exists "Members can access their business's customers"
+  on public.customers;
+
 create policy "Members can access their business's customers"
   on public.customers for all
   using (business_id = public.current_business_id())
