@@ -14,6 +14,11 @@
 --     public.save_estimate_line_items(), which replaces an estimate's
 --     items atomically and recomputes its subtotal columns in the same
 --     transaction — the app never has to keep the two in sync itself.
+--     Its business_id is enforced, at the database level, to match its
+--     own estimate's business_id — via a composite foreign key
+--     (estimate_id, business_id) -> estimates (id, business_id), not
+--     merely RLS or application code. This is why estimates carries a
+--     unique (id, business_id) constraint below.
 --
 -- Both tables get the same single-policy RLS pattern as customers:
 -- business_id = current_business_id() on every command. There is no
@@ -58,7 +63,15 @@ create table if not exists public.estimates (
   final_selling_price numeric(12, 2) check (final_selling_price >= 0),
 
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+
+  -- Referenced by estimate_line_items' composite foreign key below, so
+  -- a line item's business_id can be enforced against its *specific*
+  -- estimate's business_id at the database level, not just against
+  -- businesses in general. id alone is already unique (it's the primary
+  -- key); this composite constraint exists purely so Postgres will
+  -- accept (id, business_id) as an FK target.
+  constraint estimates_id_business_id_key unique (id, business_id)
 );
 
 comment on table public.estimates is
@@ -106,9 +119,8 @@ create trigger estimates_check_customer_business
 
 create table if not exists public.estimate_line_items (
   id uuid primary key default gen_random_uuid(),
-  estimate_id uuid not null references public.estimates (id) on delete cascade,
-  business_id uuid not null default public.current_business_id()
-    references public.businesses (id) on delete cascade,
+  estimate_id uuid not null,
+  business_id uuid not null default public.current_business_id(),
 
   category text not null check (category in ('labor', 'materials', 'equipment', 'other')),
   description text not null check (btrim(description) <> ''),
@@ -117,11 +129,23 @@ create table if not exists public.estimate_line_items (
   sort_order integer not null default 0,
 
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+
+  -- Composite FK instead of two separate single-column ones: this is
+  -- what forces business_id to match *this row's own estimate*, not
+  -- merely to be some valid business — a plain FK on business_id alone
+  -- can't express that. estimates.business_id already cascades from
+  -- businesses, so cascading here off estimates is sufficient to reach
+  -- a deleted business transitively; no separate FK to businesses is
+  -- needed on this table.
+  constraint estimate_line_items_estimate_business_fkey
+    foreign key (estimate_id, business_id)
+    references public.estimates (id, business_id)
+    on delete cascade
 );
 
 comment on table public.estimate_line_items is
-  'Normalized labor/materials/equipment/other line items behind an estimate''s subtotal columns. Written only via public.save_estimate_line_items().';
+  'Normalized labor/materials/equipment/other line items behind an estimate''s subtotal columns. Written only via public.save_estimate_line_items(). business_id is enforced to match the parent estimate''s business_id via a composite foreign key, not RLS/application code alone.';
 
 create index if not exists estimate_line_items_estimate_id_idx
   on public.estimate_line_items (estimate_id, sort_order);
@@ -189,7 +213,8 @@ begin
     coalesce((item ->> 'quantity')::numeric, 1),
     coalesce((item ->> 'unit_cost')::numeric, 0),
     (ordinality - 1)::int
-  from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) with ordinality as item;
+  from jsonb_array_elements(coalesce(p_items, '[]'::jsonb))
+    with ordinality as items(item, ordinality);
 
   update public.estimates
   set
