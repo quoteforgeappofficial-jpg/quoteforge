@@ -67,27 +67,29 @@ four variables in your Vercel project → **Settings** → **Environment
 Variables**, once the project is connected to Vercel. Local env vars and
 Vercel's env vars are separate — setting one does not set the other.
 
-## 4. Run the database migration
+## 4. Run the database migrations
 
-The migration that creates the `businesses` and `profiles` tables (with
-Row Level Security enabled) lives at:
+Each file in `supabase/migrations/` must be run once, **in filename
+order** (each one assumes the previous ones already ran):
 
 ```
-supabase/migrations/20260908120000_init_auth_foundation.sql
+supabase/migrations/20260908120000_init_auth_foundation.sql   -- businesses, profiles, RLS
+supabase/migrations/20260909100000_customers.sql               -- customers, RLS
 ```
 
-**ANDROID ACTION — run it via the Supabase SQL Editor (works fine on
-mobile, no CLI needed):**
+**ANDROID ACTION — run each one via the Supabase SQL Editor (works fine
+on mobile, no CLI needed):**
 1. In the Supabase dashboard, open **SQL Editor**.
-2. Open the migration file above (ask Claude Code to show you its
+2. Open a migration file above (ask Claude Code to show you its
    contents, or view it on GitHub) and copy its full contents.
 3. Paste into a new query in the SQL Editor and click **Run**.
-4. Confirm it succeeded with no errors. You should now see `businesses`
-   and `profiles` tables under **Table Editor**, both with RLS enabled.
+4. Confirm it succeeded with no errors, then repeat for the next
+   migration file. You should end up with `businesses`, `profiles`, and
+   `customers` tables under **Table Editor**, all with RLS enabled.
 
 *(Alternative for later: if you ever work from a desktop with the
 [Supabase CLI](https://supabase.com/docs/guides/cli) installed, `supabase
-db push` applies migrations from this folder the same way.)*
+db push` applies every migration in this folder the same way.)*
 
 ## 5. Configure auth redirect URLs
 
@@ -118,10 +120,10 @@ available:
 5. Confirm `/dashboard` redirects to `/login` when you're signed out, and
    that `/login` redirects to `/dashboard` when you're already signed in.
 
-## What this migration does **not** do yet
+## What these migrations do **not** do yet
 
-No `customers`, `estimates`, `estimate_items`, or `proposals` tables
-exist yet — those come in a later phase. The migration does set up the
-`public.current_business_id()` helper and documents (in SQL comments) the
-RLS pattern those tables should follow when they're added, so multi-tenant
-isolation stays consistent.
+No `estimates`, `estimate_items`, or `proposals` tables exist yet — those
+come in a later phase. The auth-foundation migration set up the
+`public.current_business_id()` helper, which the `customers` migration
+(and every future business-scoped table) reuses for its RLS policy, so
+multi-tenant isolation stays consistent across all of them.
