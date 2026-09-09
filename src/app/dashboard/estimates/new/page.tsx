@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { createEstimate } from "@/lib/estimates/actions";
-import { EstimateForm } from "@/components/estimates/estimate-form";
+import { NewEstimateForm } from "@/components/estimates/new-estimate-form";
 import { FormMessage } from "@/components/ui/form-message";
 
 export default async function NewEstimatePage({
@@ -39,12 +38,7 @@ export default async function NewEstimatePage({
         <FormMessage error={error} />
       </div>
 
-      <EstimateForm
-        action={createEstimate}
-        initialLineItems={[]}
-        customers={customers ?? []}
-        submitLabel="Create estimate"
-      />
+      <NewEstimateForm customers={customers ?? []} />
     </div>
   );
 }

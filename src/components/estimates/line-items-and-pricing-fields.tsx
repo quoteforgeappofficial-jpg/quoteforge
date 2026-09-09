@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { forwardRef, useId, useImperativeHandle, useState } from "react";
 import {
   LINE_ITEM_CATEGORIES,
   LINE_ITEM_CATEGORY_LABELS,
@@ -16,6 +16,27 @@ type Row = {
   description: string;
   quantity: string;
   unitCost: string;
+};
+
+/** A row to inject via the imperative handle below — same shape as Row, minus its internal key. */
+export type LineItemDraftRow = {
+  category: LineItemCategory;
+  description: string;
+  quantity: string;
+  unitCost: string;
+};
+
+/**
+ * Imperative handle so an ancestor (the AI drafting flow on the New
+ * Estimate page) can inject line items without this component's props
+ * changing — the Edit page's usage is completely unaffected by any of
+ * this; it simply never passes a ref.
+ */
+export type LineItemsAndPricingFieldsHandle = {
+  /** Whether the contractor has already entered any line items, in any category. */
+  hasAnyItems: () => boolean;
+  /** Replaces every category's rows with the given set, grouped by category. Never touches markup/minimum/final-price fields. */
+  replaceAllItems: (rows: LineItemDraftRow[]) => void;
 };
 
 const inputClass =
@@ -39,24 +60,30 @@ function normalizeNumericInput(raw: string): string {
   return raw.replace(/^0+(?=\d)/, "");
 }
 
-export function LineItemsAndPricingFields({
-  initialItems,
-  initialMarkupType,
-  initialMarkupValue,
-  initialMinimumJobPrice,
-  initialFinalSellingPrice,
-}: {
-  initialItems: {
-    category: LineItemCategory;
-    description: string;
-    quantity: number;
-    unit_cost: number;
-  }[];
-  initialMarkupType: MarkupType;
-  initialMarkupValue: number;
-  initialMinimumJobPrice: number | null;
-  initialFinalSellingPrice: number | null;
-}) {
+export const LineItemsAndPricingFields = forwardRef<
+  LineItemsAndPricingFieldsHandle,
+  {
+    initialItems: {
+      category: LineItemCategory;
+      description: string;
+      quantity: number;
+      unit_cost: number;
+    }[];
+    initialMarkupType: MarkupType;
+    initialMarkupValue: number;
+    initialMinimumJobPrice: number | null;
+    initialFinalSellingPrice: number | null;
+  }
+>(function LineItemsAndPricingFields(
+  {
+    initialItems,
+    initialMarkupType,
+    initialMarkupValue,
+    initialMinimumJobPrice,
+    initialFinalSellingPrice,
+  },
+  ref,
+) {
   const idPrefix = useId();
 
   const [rowsByCategory, setRowsByCategory] = useState<
@@ -81,6 +108,32 @@ export function LineItemsAndPricingFields({
   );
   const [finalSellingPrice, setFinalSellingPrice] = useState(
     initialFinalSellingPrice != null ? String(initialFinalSellingPrice) : "",
+  );
+
+  // Only exposes line-item replacement — markup/minimum/final-price state
+  // above is never touched through this handle, so nothing reachable from
+  // it can set contractor pricing.
+  useImperativeHandle(
+    ref,
+    () => ({
+      hasAnyItems: () =>
+        LINE_ITEM_CATEGORIES.some(
+          (category) => rowsByCategory[category].length > 0,
+        ),
+      replaceAllItems: (rows) => {
+        const grouped = emptyRowMap();
+        rows.forEach((row, index) => {
+          grouped[row.category].push({
+            key: `ai-${Date.now()}-${index}`,
+            description: row.description,
+            quantity: row.quantity,
+            unitCost: row.unitCost,
+          });
+        });
+        setRowsByCategory(grouped);
+      },
+    }),
+    [rowsByCategory],
   );
 
   function addRow(category: LineItemCategory) {
@@ -384,4 +437,4 @@ export function LineItemsAndPricingFields({
       </div>
     </div>
   );
-}
+});

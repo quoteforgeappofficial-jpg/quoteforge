@@ -1,13 +1,12 @@
-import { type TextareaHTMLAttributes } from "react";
+import { forwardRef, type TextareaHTMLAttributes } from "react";
 
-export function TextareaField({
-  label,
-  id,
-  ...props
-}: {
-  label: string;
-  id: string;
-} & TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export const TextareaField = forwardRef<
+  HTMLTextAreaElement,
+  {
+    label: string;
+    id: string;
+  } & TextareaHTMLAttributes<HTMLTextAreaElement>
+>(function TextareaField({ label, id, ...props }, ref) {
   return (
     <div>
       <label
@@ -17,6 +16,7 @@ export function TextareaField({
         {label}
       </label>
       <textarea
+        ref={ref}
         id={id}
         name={id}
         rows={4}
@@ -25,4 +25,4 @@ export function TextareaField({
       />
     </div>
   );
-}
+});
