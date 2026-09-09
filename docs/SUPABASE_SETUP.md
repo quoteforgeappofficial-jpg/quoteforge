@@ -75,6 +75,7 @@ order** (each one assumes the previous ones already ran):
 ```
 supabase/migrations/20260908120000_init_auth_foundation.sql   -- businesses, profiles, RLS
 supabase/migrations/20260909100000_customers.sql               -- customers, RLS
+supabase/migrations/20260909112300_estimates.sql                -- estimates, estimate_line_items, RLS
 ```
 
 **ANDROID ACTION — run each one via the Supabase SQL Editor (works fine
@@ -84,8 +85,9 @@ on mobile, no CLI needed):**
    contents, or view it on GitHub) and copy its full contents.
 3. Paste into a new query in the SQL Editor and click **Run**.
 4. Confirm it succeeded with no errors, then repeat for the next
-   migration file. You should end up with `businesses`, `profiles`, and
-   `customers` tables under **Table Editor**, all with RLS enabled.
+   migration file. You should end up with `businesses`, `profiles`,
+   `customers`, `estimates`, and `estimate_line_items` tables under
+   **Table Editor**, all with RLS enabled.
 
 *(Alternative for later: if you ever work from a desktop with the
 [Supabase CLI](https://supabase.com/docs/guides/cli) installed, `supabase
@@ -122,8 +124,9 @@ available:
 
 ## What these migrations do **not** do yet
 
-No `estimates`, `estimate_items`, or `proposals` tables exist yet — those
-come in a later phase. The auth-foundation migration set up the
-`public.current_business_id()` helper, which the `customers` migration
-(and every future business-scoped table) reuses for its RLS policy, so
-multi-tenant isolation stays consistent across all of them.
+No `proposals` or payments tables exist yet, and there's no AI involved
+anywhere in estimating — those come in later phases. The auth-foundation
+migration set up the `public.current_business_id()` helper, which the
+`customers` and `estimates` migrations (and every future business-scoped
+table) reuse for their RLS policies, so multi-tenant isolation stays
+consistent across all of them.
