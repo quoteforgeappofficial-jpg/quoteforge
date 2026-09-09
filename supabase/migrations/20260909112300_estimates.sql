@@ -20,10 +20,28 @@
 --     merely RLS or application code. This is why estimates carries a
 --     unique (id, business_id) constraint below.
 --
--- Both tables get the same single-policy RLS pattern as customers:
--- business_id = current_business_id() on every command. There is no
--- public/anon access anywhere in this migration — estimates (including
--- their cost/markup/pricing fields) are only ever reachable through an
+-- Subtotal-drift prevention: estimates.<category>_subtotal is only ever
+-- correct if it's kept in sync with the line items behind it, so two
+-- separate database-level restrictions back that up rather than relying
+-- on application discipline alone:
+--   - estimate_line_items' RLS grants authenticated users SELECT only —
+--     there is no insert/update/delete policy for that role, so those
+--     commands are rejected outright regardless of what the client
+--     sends. save_estimate_line_items() is SECURITY DEFINER, so it (and
+--     only it) can still write these rows, bypassing RLS as the
+--     function's owner — with its own explicit business_id check taking
+--     over the authorization job RLS would otherwise have done.
+--   - estimates' column-level privileges restrict authenticated INSERT/
+--     UPDATE to the non-subtotal columns only, so even a direct,
+--     hand-crafted request against estimates itself cannot set or
+--     change labor_subtotal/materials_subtotal/equipment_subtotal/
+--     other_expenses_subtotal — only save_estimate_line_items() (via
+--     SECURITY DEFINER) can.
+--
+-- Both tables get the same single-policy RLS pattern as customers for
+-- read access: business_id = current_business_id(). There is no public/
+-- anon access anywhere in this migration — estimates (including their
+-- cost/markup/pricing fields) are only ever reachable through an
 -- authenticated session belonging to the owning business. Customer-
 -- facing proposal views, if built later, will need their own explicit,
 -- narrower access path rather than inheriting this one.
@@ -170,12 +188,31 @@ create trigger estimate_line_items_set_updated_at
 -- Replace an estimate's line items and recompute its subtotal columns
 -- ---------------------------------------------------------------------
 --
--- Deliberately security invoker (the default — no "security definer"):
--- every statement below runs as the calling user, so it can only ever
--- read or write rows that user's own RLS policies already allow. The
--- initial lookup doubles as an authorization check — an estimate_id
--- that isn't visible to the caller yields no business_id, and the
--- function raises rather than silently doing nothing.
+-- SECURITY DEFINER: this is deliberate, and is what makes it possible
+-- for estimate_line_items' own RLS (below) to grant authenticated users
+-- SELECT only — this function is the *only* path left that can write
+-- those rows, since it runs as the function's owner and so bypasses RLS
+-- on both tables it touches, regardless of what policies exist for
+-- authenticated.
+--
+-- That bypass means, unlike a security-invoker function, the initial
+-- "does this estimate exist" lookup can no longer double as an
+-- authorization check on its own — under RLS bypass it would happily
+-- return an estimate belonging to a different business entirely. The
+-- explicit v_caller_business_id comparison below is what restores that
+-- check: it calls public.current_business_id(), which independently
+-- resolves the caller's own business from auth.uid() via profiles, and
+-- rejects the call unless it matches the target estimate's business_id.
+-- p_estimate_id is the only input identifying which estimate to touch —
+-- there is no p_business_id parameter, so a caller can never supply
+-- (and this function never trusts) its own claim of which business it
+-- belongs to.
+--
+-- search_path is locked to empty and every reference is schema-
+-- qualified, the same hardening already used by handle_new_user() and
+-- current_business_id(), for the same reason: a SECURITY DEFINER
+-- function must not let search_path substitute a different object than
+-- the one it was written against.
 --
 -- Replace-all-on-save (delete then reinsert) keeps this simple for a
 -- first version: the app always submits the full current set of line
@@ -187,17 +224,25 @@ create or replace function public.save_estimate_line_items(
 )
 returns void
 language plpgsql
+security definer
 set search_path = ''
 as $$
 declare
   v_business_id uuid;
+  v_caller_business_id uuid;
 begin
   select business_id into v_business_id
   from public.estimates
   where id = p_estimate_id;
 
   if v_business_id is null then
-    raise exception 'estimate % not found or not accessible', p_estimate_id;
+    raise exception 'estimate % not found', p_estimate_id;
+  end if;
+
+  v_caller_business_id := public.current_business_id();
+
+  if v_caller_business_id is null or v_caller_business_id <> v_business_id then
+    raise exception 'not authorized to modify estimate %', p_estimate_id;
   end if;
 
   delete from public.estimate_line_items where estimate_id = p_estimate_id;
@@ -256,10 +301,44 @@ create policy "Members can access their business's estimates"
   using (business_id = public.current_business_id())
   with check (business_id = public.current_business_id());
 
+-- Column-level write restriction on estimates: RLS above only checks
+-- *which row* is being touched (business_id = current_business_id()),
+-- not *which columns* — an authenticated update against the caller's
+-- own estimate would otherwise be free to also set labor_subtotal,
+-- materials_subtotal, equipment_subtotal, or other_expenses_subtotal to
+-- anything at all, drifting them out of sync with the line items behind
+-- them. Revoking the table-wide insert/update privilege and re-granting
+-- it only for the columns the app actually writes closes that off: an
+-- insert/update naming a subtotal column now fails at the privilege
+-- check, before RLS is even evaluated. (Postgres note: a column-level
+-- REVOKE alone would have no effect while a table-wide grant still
+-- covers that column, so the table-wide privilege must be revoked
+-- first.) Only save_estimate_line_items() — via SECURITY DEFINER — can
+-- still set these four columns.
+revoke insert, update on public.estimates from authenticated;
+grant insert (
+  customer_id, title, status, description, internal_notes,
+  markup_type, markup_value, minimum_job_price, final_selling_price
+) on public.estimates to authenticated;
+grant update (
+  customer_id, title, status, description, internal_notes,
+  markup_type, markup_value, minimum_job_price, final_selling_price
+) on public.estimates to authenticated;
+
+-- estimate_line_items: SELECT only for authenticated. There is
+-- deliberately no insert/update/delete policy for that role — under
+-- RLS, a command with no matching policy is denied outright, so direct
+-- writes against this table are rejected regardless of business_id.
+-- save_estimate_line_items() (SECURITY DEFINER, above) is the only
+-- remaining write path, which is what actually guarantees the
+-- estimates subtotal columns stay in sync with these rows.
+
 drop policy if exists "Members can access their business's estimate line items"
   on public.estimate_line_items;
 
-create policy "Members can access their business's estimate line items"
-  on public.estimate_line_items for all
-  using (business_id = public.current_business_id())
-  with check (business_id = public.current_business_id());
+drop policy if exists "Members can view their business's estimate line items"
+  on public.estimate_line_items;
+
+create policy "Members can view their business's estimate line items"
+  on public.estimate_line_items for select
+  using (business_id = public.current_business_id());
