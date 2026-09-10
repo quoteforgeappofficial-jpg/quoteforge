@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isValidPublicToken } from "@/lib/proposals/token";
 import {
   toPublicProposal,
   type PublicProposal,
@@ -33,11 +34,16 @@ import {
  * a Client Component fail at build time, before the service-role key
  * could ever reach the browser bundle — same guard already used by
  * admin.ts itself and by src/lib/ai/provider.ts.
+ *
+ * `token` is validated against isValidPublicToken() BEFORE any query
+ * runs — a malformed token never reaches Supabase at all, and produces
+ * exactly the same `null` result a well-formed-but-nonexistent token
+ * would, so a caller of this function can never tell the two apart.
  */
 export async function getPublicProposalByToken(
   token: string,
 ): Promise<PublicProposal | null> {
-  if (!token) {
+  if (!isValidPublicToken(token)) {
     return null;
   }
 

@@ -4,25 +4,25 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { generatePublicToken } from "@/lib/proposals/token";
-import type { Estimate, EstimateLineItem } from "@/lib/estimates/types";
 
 const LIST_PATH = "/dashboard/proposals";
 
 /**
  * Creates a customer-facing proposal snapshot from an estimate.
  *
- * Everything copied here is customer-safe by construction: title,
- * description, customer_id, final_selling_price, and each line item's
- * description/quantity. unit_cost, the four cost subtotals, markup,
- * minimum_job_price, and internal_notes are never read out of the
- * estimate at all in this function — there's no variable holding them
- * to accidentally pass through, not just a field left off an object
- * literal.
+ * Delegates entirely to the create_proposal_from_estimate() SECURITY
+ * DEFINER RPC (see the Phase 6 migration) — this function's job is just
+ * to generate the public token (Node's crypto.randomBytes, the single
+ * token generator — see token.ts) and translate the RPC's outcome into
+ * a redirect. All authorization, the same-business check, the
+ * final_selling_price requirement, the customer/business consistency
+ * check, and the atomic snapshot of proposal + line items happen inside
+ * the RPC, in one transaction.
  *
- * Uses the regular RLS-scoped client throughout (never the admin
- * client) — every read and write here is subject to the caller's own
- * business_id, exactly like every other authenticated Server Action in
- * this app.
+ * `authenticated` has no direct INSERT privilege on proposals or
+ * proposal_line_items (see the migration's "Table privileges" section)
+ * — this RPC is the only way to create either, whether called from here
+ * or anywhere else.
  */
 export async function createProposalFromEstimate(estimateId: string) {
   const supabase = await createClient();
@@ -36,69 +36,15 @@ export async function createProposalFromEstimate(estimateId: string) {
 
   const estimatePath = `/dashboard/estimates/${estimateId}`;
 
-  // RLS means an estimate belonging to another business simply isn't
-  // visible here — this redirect covers both "doesn't exist" and
-  // "not yours" without distinguishing between them.
-  const { data: estimate } = await supabase
-    .from("estimates")
-    .select("*")
-    .eq("id", estimateId)
-    .single<Estimate>();
+  const { data: proposalId, error } = await supabase.rpc(
+    "create_proposal_from_estimate",
+    {
+      p_estimate_id: estimateId,
+      p_public_token: generatePublicToken(),
+    },
+  );
 
-  if (!estimate) {
-    redirect(
-      `${LIST_PATH}?error=${encodeURIComponent("Estimate not found.")}`,
-    );
-  }
-
-  if (estimate.final_selling_price == null) {
-    redirect(
-      `${estimatePath}?error=${encodeURIComponent(
-        "Set a final selling price before creating a proposal.",
-      )}`,
-    );
-  }
-
-  // One proposal per estimate: check first so a contractor double-
-  // clicking "Create proposal" lands on the existing proposal instead
-  // of hitting the unique-constraint violation this would otherwise be
-  // — the constraint itself (proposals.estimate_id is unique) is the
-  // real backstop, this check just makes the common case a clean
-  // redirect instead of a raw database error.
-  const { data: existingProposal } = await supabase
-    .from("proposals")
-    .select("id")
-    .eq("estimate_id", estimateId)
-    .maybeSingle<{ id: string }>();
-
-  if (existingProposal) {
-    redirect(`${LIST_PATH}/${existingProposal.id}`);
-  }
-
-  const { data: lineItems } = await supabase
-    .from("estimate_line_items")
-    .select("description, quantity")
-    .eq("estimate_id", estimateId)
-    .order("sort_order", { ascending: true })
-    .returns<Pick<EstimateLineItem, "description" | "quantity">[]>();
-
-  // business_id is not set explicitly — it defaults to the caller's own
-  // business (see the proposals migration), and RLS's with-check
-  // rejects the insert outright if that were ever not the case.
-  const { data: proposal, error } = await supabase
-    .from("proposals")
-    .insert({
-      estimate_id: estimateId,
-      customer_id: estimate.customer_id,
-      public_token: generatePublicToken(),
-      title: estimate.title,
-      description: estimate.description,
-      final_selling_price: estimate.final_selling_price,
-    })
-    .select("id")
-    .single<{ id: string }>();
-
-  if (error || !proposal) {
+  if (error || !proposalId) {
     redirect(
       `${estimatePath}?error=${encodeURIComponent(
         error?.message ?? "Could not create proposal.",
@@ -106,41 +52,26 @@ export async function createProposalFromEstimate(estimateId: string) {
     );
   }
 
-  if (lineItems && lineItems.length > 0) {
-    const { error: lineItemsError } = await supabase
-      .from("proposal_line_items")
-      .insert(
-        lineItems.map((item, index) => ({
-          proposal_id: proposal.id,
-          description: item.description,
-          quantity: item.quantity,
-          sort_order: index,
-        })),
-      );
-
-    if (lineItemsError) {
-      // Don't leave a proposal with no line items lying around — clean
-      // up and surface a clear error rather than a silently incomplete
-      // proposal.
-      await supabase.from("proposals").delete().eq("id", proposal.id);
-      redirect(
-        `${estimatePath}?error=${encodeURIComponent(
-          "Could not create proposal: " + lineItemsError.message,
-        )}`,
-      );
-    }
-  }
-
   revalidatePath(LIST_PATH);
   revalidatePath(estimatePath);
-  redirect(`${LIST_PATH}/${proposal.id}`);
+  redirect(`${LIST_PATH}/${proposalId}`);
 }
 
 /**
  * Marks a proposal as sent — the only status transition a contractor
  * triggers directly (the customer-facing accept/decline transitions
- * live in src/lib/proposals/public-actions.ts). No email/SMS is sent by
- * this phase; it only records that the contractor has shared the link.
+ * live in src/lib/proposals/public-actions.ts, gated to sent-only). No
+ * email/SMS is sent by this phase; it only records that the contractor
+ * has shared the link.
+ *
+ * Delegates to the mark_proposal_as_sent() SECURITY DEFINER RPC, which
+ * performs the draft -> sent transition as one atomic UPDATE ... WHERE
+ * status = 'draft' ... RETURNING and reports back whether a row
+ * actually transitioned. `authenticated` has no direct UPDATE privilege
+ * on proposals (see the migration) — this RPC is the only way to set
+ * status to 'sent'. Unlike the previous version of this function, a
+ * proposal that's already past "draft" now produces a visible error
+ * instead of a silent no-op success.
  */
 export async function markProposalAsSent(proposalId: string) {
   const supabase = await createClient();
@@ -154,16 +85,21 @@ export async function markProposalAsSent(proposalId: string) {
 
   const proposalPath = `${LIST_PATH}/${proposalId}`;
 
-  // RLS scopes this to the caller's own business, same as every other
-  // update in this app.
-  const { error } = await supabase
-    .from("proposals")
-    .update({ status: "sent", sent_at: new Date().toISOString() })
-    .eq("id", proposalId)
-    .eq("status", "draft");
+  const { data: transitioned, error } = await supabase.rpc(
+    "mark_proposal_as_sent",
+    { p_proposal_id: proposalId },
+  );
 
   if (error) {
     redirect(`${proposalPath}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (!transitioned) {
+    redirect(
+      `${proposalPath}?error=${encodeURIComponent(
+        "This proposal is no longer in draft status.",
+      )}`,
+    );
   }
 
   revalidatePath(LIST_PATH);

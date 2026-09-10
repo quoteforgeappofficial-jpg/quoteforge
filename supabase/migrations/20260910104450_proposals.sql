@@ -23,9 +23,18 @@
 -- narrowly-scoped server module that selects an explicit, hard-coded
 -- column allowlist — never `select("*")` — and maps the result through
 -- an explicit DTO before it ever reaches a page. The public token itself
--- (128+ bits of randomness, generated server-side in application code)
+-- (192 bits of randomness, generated server-side in application code)
 -- is the only thing that ever identifies a proposal to an anonymous
 -- visitor; the row's own UUID is never sent to the browser.
+--
+-- Hardening pass (this revision, migration still unapplied): mutation
+-- of both tables now happens ONLY through two SECURITY DEFINER RPCs
+-- (create_proposal_from_estimate, mark_proposal_as_sent) plus the
+-- public accept/decline path's single atomic UPDATE via the admin
+-- client (src/lib/proposals/public-actions.ts) — never through
+-- unrestricted table INSERT/UPDATE/DELETE from `authenticated`. See the
+-- "Table privileges" section near the bottom for the exact model and
+-- reasoning.
 --
 -- Nothing in the existing auth/customers/estimates foundation is
 -- changed by this migration.
@@ -51,16 +60,20 @@ create table if not exists public.proposals (
   -- Not a default/random-looking sequential value — always generated
   -- server-side by src/lib/proposals/token.ts before insert. `unique`
   -- is the DB-level backstop against a (astronomically unlikely, given
-  -- 128+ bits of entropy) collision.
-  public_token text not null unique,
+  -- 192 bits of entropy) collision. The check constraint mirrors
+  -- src/lib/proposals/token.ts's isValidPublicToken() exactly (32
+  -- base64url characters) — defense in depth in case application code
+  -- ever generates a token some other way.
+  public_token text not null unique
+    check (public_token ~ '^[A-Za-z0-9_-]{32}$'),
 
   status text not null default 'draft'
     check (status in ('draft', 'sent', 'accepted', 'declined')),
 
-  -- Snapshotted from the estimate at creation time — see the trigger-free
-  -- application logic in src/lib/proposals/actions.ts. Deliberately no
-  -- foreign key to estimates for these values themselves (they're a
-  -- point-in-time copy, not a live reference).
+  -- Snapshotted from the estimate at creation time — see
+  -- create_proposal_from_estimate() below. Deliberately no foreign key
+  -- to estimates for these values themselves (they're a point-in-time
+  -- copy, not a live reference).
   title text not null check (btrim(title) <> ''),
   description text,
   final_selling_price numeric(12, 2) not null check (final_selling_price >= 0),
@@ -84,7 +97,7 @@ create table if not exists public.proposals (
 );
 
 comment on table public.proposals is
-  'Customer-facing proposal snapshots created from an estimate. Contains no internal cost/markup/profit data — only final_selling_price and customer-safe fields. Publicly readable by public_token only, through the server-only admin client — never through RLS.';
+  'Customer-facing proposal snapshots created from an estimate. Contains no internal cost/markup/profit data — only final_selling_price and customer-safe fields. Publicly readable by public_token only, through the server-only admin client — never through RLS. Mutated only through create_proposal_from_estimate()/mark_proposal_as_sent() (contractor) or a single atomic UPDATE via the admin client (public accept/decline) — see "Table privileges" below.';
 
 create index if not exists proposals_business_id_created_at_idx
   on public.proposals (business_id, created_at desc);
@@ -105,6 +118,16 @@ create index if not exists proposals_public_token_idx
 -- trigger enforces that a linked customer_id belongs to the same
 -- business. Runs with the caller's own privileges (no security
 -- definer), so the lookup is itself subject to customers' RLS.
+--
+-- This still fires correctly for inserts made from inside
+-- create_proposal_from_estimate() below, even though that function is
+-- SECURITY DEFINER (which bypasses RLS for statements it runs): the
+-- trigger's own query has an explicit `and business_id = new.business_id`
+-- condition, so its correctness never depended on RLS filtering rows —
+-- only on RLS *not blocking* the query outright, which SECURITY DEFINER
+-- guarantees rather than threatens. create_proposal_from_estimate()
+-- additionally re-checks this itself before inserting, so the two are
+-- redundant by design rather than the trigger being the only guard.
 
 create or replace function public.check_proposal_customer_business()
 returns trigger
@@ -134,8 +157,8 @@ create trigger proposals_check_customer_business
 --
 -- Deliberately minimal: description + optional quantity only. No
 -- unit_cost column, no category, no updated_at (these rows are written
--- once at proposal-creation time and never edited afterward — see
--- src/lib/proposals/actions.ts — so there is nothing to keep in sync).
+-- once, inside create_proposal_from_estimate() below, and never edited
+-- afterward — so there is nothing to keep in sync).
 
 create table if not exists public.proposal_line_items (
   id uuid primary key default gen_random_uuid(),
@@ -161,7 +184,7 @@ create table if not exists public.proposal_line_items (
 );
 
 comment on table public.proposal_line_items is
-  'Snapshotted customer-facing line items for a proposal: description + optional quantity only. No unit_cost column exists on this table at all.';
+  'Snapshotted customer-facing line items for a proposal: description + optional quantity only. No unit_cost column exists on this table at all. Immutable after creation — written only by create_proposal_from_estimate().';
 
 create index if not exists proposal_line_items_proposal_id_idx
   on public.proposal_line_items (proposal_id, sort_order);
@@ -179,34 +202,250 @@ create trigger proposals_set_updated_at
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------
+-- create_proposal_from_estimate: atomic, authenticated proposal creation
+-- ---------------------------------------------------------------------
+--
+-- Replaces the previous two-step "insert proposal, then insert
+-- proposal_line_items, then best-effort cleanup on failure" application
+-- logic with one database transaction — a single RPC call is atomic by
+-- construction (plpgsql functions cannot partially commit).
+--
+-- SECURITY DEFINER, matching save_estimate_line_items()'s established
+-- pattern (Phase 4): runs with the function owner's privileges, so it
+-- can insert into proposals/proposal_line_items even though
+-- `authenticated` itself holds no direct INSERT privilege on either
+-- table (see "Table privileges" below). Because that bypasses RLS, this
+-- function is the actual authorization boundary, which is why it:
+--   - resolves the caller's own business via public.current_business_id()
+--     (which itself reads auth.uid() — unaffected by SECURITY DEFINER
+--     nesting, since auth.uid() comes from session-level JWT claims, not
+--     Postgres role privileges) rather than trusting any caller-supplied
+--     business id,
+--   - reads the estimate by id only, then explicitly checks its
+--     business_id against the caller's — never relies on RLS to filter
+--     it out for a cross-business id,
+--   - reads only the five estimate columns it might snapshot
+--     (business_id for the check, customer_id, title, description,
+--     final_selling_price) into named variables — there is no `record`
+--     or `select *` here holding unit_cost/subtotals/markup/
+--     minimum_job_price/internal_notes even transiently,
+--   - requires final_selling_price to be non-null before doing anything
+--     else,
+--   - re-checks customer/business consistency explicitly (redundant
+--     with, but independent of, the trigger above),
+--   - copies only description/quantity from each estimate line item.
+--
+-- One-proposal-per-estimate race: `insert ... on conflict (estimate_id)
+-- do nothing returning id` is itself atomic — Postgres blocks a
+-- conflicting concurrent INSERT until the other transaction commits or
+-- rolls back before resolving the conflict, so by the time this
+-- function's own insert decides "do nothing", the winning transaction's
+-- row is guaranteed visible to the follow-up `select`. Both concurrent
+-- callers therefore return the same proposal id; the estimate_id unique
+-- constraint is never weakened, and no caller ever sees a raw
+-- constraint-violation error for this case.
+--
+-- p_public_token is generated in application code
+-- (src/lib/proposals/token.ts, the single token generator) and passed
+-- in rather than generated in SQL, per that module's own reasoning.
+
+create or replace function public.create_proposal_from_estimate(
+  p_estimate_id uuid,
+  p_public_token text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_caller_business_id uuid;
+  v_estimate_business_id uuid;
+  v_customer_id uuid;
+  v_title text;
+  v_description text;
+  v_final_selling_price numeric(12, 2);
+  v_proposal_id uuid;
+begin
+  v_caller_business_id := public.current_business_id();
+
+  if v_caller_business_id is null then
+    raise exception 'Not authorized.';
+  end if;
+
+  select business_id, customer_id, title, description, final_selling_price
+    into v_estimate_business_id, v_customer_id, v_title, v_description, v_final_selling_price
+  from public.estimates
+  where id = p_estimate_id;
+
+  -- Combines "no such estimate" and "not yours" into one message,
+  -- deliberately not distinguishing them — the same posture the
+  -- application layer already used before this hardening pass.
+  if v_estimate_business_id is null or v_estimate_business_id <> v_caller_business_id then
+    raise exception 'Estimate not found or not accessible.';
+  end if;
+
+  if v_final_selling_price is null then
+    raise exception 'Set a final selling price before creating a proposal.';
+  end if;
+
+  if v_customer_id is not null and not exists (
+    select 1 from public.customers
+    where id = v_customer_id and business_id = v_caller_business_id
+  ) then
+    raise exception 'Estimate data is inconsistent — customer does not belong to this business.';
+  end if;
+
+  insert into public.proposals (
+    business_id, estimate_id, customer_id, public_token,
+    title, description, final_selling_price
+  )
+  values (
+    v_caller_business_id, p_estimate_id, v_customer_id, p_public_token,
+    v_title, v_description, v_final_selling_price
+  )
+  on conflict (estimate_id) do nothing
+  returning id into v_proposal_id;
+
+  if v_proposal_id is null then
+    -- Another concurrent call already created the proposal for this
+    -- estimate (see race-handling note above) — return its id rather
+    -- than erroring or creating a second one. p_public_token generated
+    -- for this call is simply discarded; it was never persisted.
+    select id into v_proposal_id
+    from public.proposals
+    where estimate_id = p_estimate_id;
+
+    return v_proposal_id;
+  end if;
+
+  insert into public.proposal_line_items (
+    proposal_id, business_id, description, quantity, sort_order
+  )
+  select v_proposal_id, v_caller_business_id, eli.description, eli.quantity, eli.sort_order
+  from public.estimate_line_items eli
+  where eli.estimate_id = p_estimate_id
+  order by eli.sort_order;
+
+  return v_proposal_id;
+end;
+$$;
+
+revoke execute on function public.create_proposal_from_estimate(uuid, text) from public;
+grant execute on function public.create_proposal_from_estimate(uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- mark_proposal_as_sent: atomic draft -> sent transition
+-- ---------------------------------------------------------------------
+--
+-- SECURITY DEFINER for the same reason as above: `authenticated` holds
+-- no direct UPDATE privilege on proposals (see "Table privileges"
+-- below), so this narrowly-scoped function is the only path to this one
+-- transition. A single UPDATE ... WHERE ... RETURNING is atomic on its
+-- own — the `status = 'draft'` condition in the WHERE clause and the
+-- write happen as one statement, so there is no separate "check status,
+-- then write" race window. Returns whether a row actually transitioned;
+-- callers (src/lib/proposals/actions.ts) must not report success when
+-- this returns false.
+
+create or replace function public.mark_proposal_as_sent(p_proposal_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_caller_business_id uuid;
+  v_updated_id uuid;
+begin
+  v_caller_business_id := public.current_business_id();
+
+  if v_caller_business_id is null then
+    raise exception 'Not authorized.';
+  end if;
+
+  update public.proposals
+  set status = 'sent', sent_at = now()
+  where id = p_proposal_id
+    and business_id = v_caller_business_id
+    and status = 'draft'
+  returning id into v_updated_id;
+
+  return v_updated_id is not null;
+end;
+$$;
+
+revoke execute on function public.mark_proposal_as_sent(uuid) from public;
+grant execute on function public.mark_proposal_as_sent(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------
 -- Row Level Security
 -- ---------------------------------------------------------------------
 --
--- Authenticated, business-scoped access only — identical single-policy
--- pattern to customers/estimates. There is no anon/public policy on
--- either table: the public /p/[token] page never queries through RLS at
--- all, it goes through the server-only admin client instead (see the
--- top-of-file note and docs/PROPOSALS_PUBLIC_ACCESS.md). That keeps
--- "authenticated contractor access" and "anonymous customer access" on
--- two completely separate code paths, rather than trying to express the
--- public case as a permissive RLS policy that could be broadened by
--- accident later.
+-- Authenticated, business-scoped SELECT only — see "Table privileges"
+-- immediately below for why this is `for select`, not `for all`, as of
+-- this hardening pass. There is no anon/public policy on either table:
+-- the public /p/[token] page never queries through RLS at all, it goes
+-- through the server-only admin client instead (see the top-of-file
+-- note and docs/PROPOSALS_PUBLIC_ACCESS.md).
 
 alter table public.proposals enable row level security;
 alter table public.proposal_line_items enable row level security;
 
 drop policy if exists "Members can access their business's proposals"
   on public.proposals;
+drop policy if exists "Members can view their business's proposals"
+  on public.proposals;
 
-create policy "Members can access their business's proposals"
-  on public.proposals for all
-  using (business_id = public.current_business_id())
-  with check (business_id = public.current_business_id());
+create policy "Members can view their business's proposals"
+  on public.proposals for select
+  using (business_id = public.current_business_id());
 
 drop policy if exists "Members can access their business's proposal line items"
   on public.proposal_line_items;
+drop policy if exists "Members can view their business's proposal line items"
+  on public.proposal_line_items;
 
-create policy "Members can access their business's proposal line items"
-  on public.proposal_line_items for all
-  using (business_id = public.current_business_id())
-  with check (business_id = public.current_business_id());
+create policy "Members can view their business's proposal line items"
+  on public.proposal_line_items for select
+  using (business_id = public.current_business_id());
+
+-- ---------------------------------------------------------------------
+-- Table privileges
+-- ---------------------------------------------------------------------
+--
+-- Explicit GRANT/REVOKE rather than relying on whatever Supabase's
+-- default privileges already applied when these tables were created —
+-- the same hardening already applied to estimates'/estimate_line_items'
+-- subtotal-drift fix. What `authenticated` can do directly, and why:
+--
+--   - SELECT: yes, on both tables — the dashboard list/detail pages
+--     (src/app/dashboard/proposals/...) read directly through the
+--     regular RLS-scoped client.
+--   - INSERT: no, on either table. Creation only happens through
+--     create_proposal_from_estimate() above, which runs as its own
+--     (privileged) owner and so is unaffected by this revoke.
+--   - UPDATE: no, on either table. This is the core of this hardening
+--     pass: without it, `authenticated` cannot set public_token,
+--     estimate_id, business_id, customer_id, title, description, or
+--     final_selling_price after creation (the snapshot stays
+--     immutable, as intended for this phase), cannot set status to
+--     'sent' except through mark_proposal_as_sent() above, and cannot
+--     set status to 'accepted'/'declined' at all as an authenticated
+--     user — that transition only ever happens through the public
+--     accept/decline path (src/lib/proposals/public-actions.ts), which
+--     uses the admin/service-role client and so is likewise unaffected
+--     by this revoke.
+--   - DELETE: no, on either table. No delete-proposal feature exists in
+--     this phase; nothing needs it.
+--
+-- The RLS policies above (select-only) already reflect this, but the
+-- privileges here are the actual enforcement — RLS only ever narrows
+-- what a query can see/touch among rows a role already has the
+-- underlying table privilege to select/insert/update/delete at all.
+
+revoke all on public.proposals from authenticated;
+grant select on public.proposals to authenticated;
+
+revoke all on public.proposal_line_items from authenticated;
+grant select on public.proposal_line_items to authenticated;

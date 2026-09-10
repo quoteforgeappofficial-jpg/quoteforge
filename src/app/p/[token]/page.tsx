@@ -104,7 +104,11 @@ export default async function PublicProposalPage({
               </p>
             ) : canRespond ? (
               <ProposalResponseButtons token={token} />
-            ) : null}
+            ) : (
+              <p className="rounded-md bg-zinc-100 px-4 py-3 text-center text-sm text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                This proposal hasn&apos;t been sent yet.
+              </p>
+            )}
           </div>
         </div>
 

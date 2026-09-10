@@ -48,16 +48,20 @@ export type ProposalLineItem = {
 
 /**
  * Whether a proposal currently in `status` may still be accepted or
- * declined by the customer. Shared by the public page (to decide
- * whether to show the Accept/Decline controls at all) and
- * respondToProposal (to actually gate the write) — one source of truth
- * for the transition rule, so the two can never quietly disagree.
+ * declined by the customer. Used by the public page to decide whether
+ * to show the Accept/Decline controls at all.
  *
- * `accepted` and `declined` are terminal: once set, a proposal cannot be
- * responded to again.
+ * Lifecycle: draft -> sent -> accepted OR declined. Only "sent" is
+ * respondable — a "draft" proposal hasn't been shared yet, and
+ * "accepted"/"declined" are terminal. The actual write path
+ * (respondToProposal in public-actions.ts) enforces this same rule
+ * directly in its database query (`.eq("status", "sent")`) rather than
+ * calling this function, since that write needs to be one atomic
+ * statement — see that file's own comments. This function exists so
+ * the *display* logic doesn't have to duplicate the lifecycle rule.
  */
 export function canRespondToProposal(status: ProposalStatus): boolean {
-  return status === "draft" || status === "sent";
+  return status === "sent";
 }
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
