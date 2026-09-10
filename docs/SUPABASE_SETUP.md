@@ -76,7 +76,13 @@ order** (each one assumes the previous ones already ran):
 supabase/migrations/20260908120000_init_auth_foundation.sql   -- businesses, profiles, RLS
 supabase/migrations/20260909100000_customers.sql               -- customers, RLS
 supabase/migrations/20260909112300_estimates.sql                -- estimates, estimate_line_items, RLS
+supabase/migrations/20260910104450_proposals.sql                -- proposals, proposal_line_items, RLS
 ```
+
+⚠️ **`20260910104450_proposals.sql` (Phase 6) has NOT been reviewed/run
+yet as of this doc update.** Read it in full and understand the public-
+access model (see `docs/PROPOSALS_PUBLIC_ACCESS.md`) before running it —
+don't run it just because it's listed here.
 
 **ANDROID ACTION — run each one via the Supabase SQL Editor (works fine
 on mobile, no CLI needed):**
@@ -86,8 +92,9 @@ on mobile, no CLI needed):**
 3. Paste into a new query in the SQL Editor and click **Run**.
 4. Confirm it succeeded with no errors, then repeat for the next
    migration file. You should end up with `businesses`, `profiles`,
-   `customers`, `estimates`, and `estimate_line_items` tables under
-   **Table Editor**, all with RLS enabled.
+   `customers`, `estimates`, `estimate_line_items`, `proposals`, and
+   `proposal_line_items` tables under **Table Editor**, all with RLS
+   enabled.
 
 *(Alternative for later: if you ever work from a desktop with the
 [Supabase CLI](https://supabase.com/docs/guides/cli) installed, `supabase
@@ -124,9 +131,9 @@ available:
 
 ## What these migrations do **not** do yet
 
-No `proposals` or payments tables exist yet, and there's no AI involved
-anywhere in estimating — those come in later phases. The auth-foundation
+No payments tables exist yet, and there's no email/SMS delivery of
+proposal links — those come in later phases. The auth-foundation
 migration set up the `public.current_business_id()` helper, which the
-`customers` and `estimates` migrations (and every future business-scoped
-table) reuse for their RLS policies, so multi-tenant isolation stays
-consistent across all of them.
+`customers`, `estimates`, and `proposals` migrations (and every future
+business-scoped table) reuse for their RLS policies, so multi-tenant
+isolation stays consistent across all of them.

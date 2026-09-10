@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { deleteEstimate } from "@/lib/estimates/actions";
+import { createProposalFromEstimate } from "@/lib/proposals/actions";
 import { DeleteEstimateButton } from "@/components/estimates/delete-estimate-button";
 import { StatusBadge } from "@/components/estimates/status-badge";
 import { FormMessage } from "@/components/ui/form-message";
@@ -37,19 +38,25 @@ export default async function EstimateDetailPage({
 
   const supabase = await createClient();
 
-  const [{ data: estimate }, { data: lineItems }] = await Promise.all([
-    supabase
-      .from("estimates")
-      .select("*, customer:customers(id, first_name, last_name, company_name)")
-      .eq("id", id)
-      .single<EstimateWithCustomer>(),
-    supabase
-      .from("estimate_line_items")
-      .select("*")
-      .eq("estimate_id", id)
-      .order("sort_order", { ascending: true })
-      .returns<EstimateLineItem[]>(),
-  ]);
+  const [{ data: estimate }, { data: lineItems }, { data: existingProposal }] =
+    await Promise.all([
+      supabase
+        .from("estimates")
+        .select("*, customer:customers(id, first_name, last_name, company_name)")
+        .eq("id", id)
+        .single<EstimateWithCustomer>(),
+      supabase
+        .from("estimate_line_items")
+        .select("*")
+        .eq("estimate_id", id)
+        .order("sort_order", { ascending: true })
+        .returns<EstimateLineItem[]>(),
+      supabase
+        .from("proposals")
+        .select("id")
+        .eq("estimate_id", id)
+        .maybeSingle<{ id: string }>(),
+    ]);
 
   // RLS means an estimate belonging to another business simply doesn't
   // come back here — indistinguishable from a nonexistent id.
@@ -99,7 +106,24 @@ export default async function EstimateDetailPage({
             </p>
           )}
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {existingProposal ? (
+            <Link
+              href={`/dashboard/proposals/${existingProposal.id}`}
+              className="inline-flex items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-50 dark:hover:bg-zinc-900"
+            >
+              View proposal
+            </Link>
+          ) : (
+            <form action={createProposalFromEstimate.bind(null, estimate.id)}>
+              <button
+                type="submit"
+                className="inline-flex items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-50 dark:hover:bg-zinc-900"
+              >
+                Create proposal
+              </button>
+            </form>
+          )}
           <Link
             href={`/dashboard/estimates/${estimate.id}/edit`}
             className="inline-flex items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-50 dark:hover:bg-zinc-900"
