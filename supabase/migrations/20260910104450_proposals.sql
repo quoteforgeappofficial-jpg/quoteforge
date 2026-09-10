@@ -417,7 +417,20 @@ create policy "Members can view their business's proposal line items"
 -- Explicit GRANT/REVOKE rather than relying on whatever Supabase's
 -- default privileges already applied when these tables were created —
 -- the same hardening already applied to estimates'/estimate_line_items'
--- subtotal-drift fix. What `authenticated` can do directly, and why:
+-- subtotal-drift fix.
+--
+-- `anon`: no privileges at all, on either table — revoked explicitly
+-- rather than left to default privileges (or to the absence of an anon
+-- RLS policy alone). The public /p/[token] page never queries through
+-- the anon role in the first place — it reads via the service-role
+-- admin client (src/lib/proposals/public-data.ts,
+-- src/lib/proposals/public-actions.ts), which is a separate Postgres
+-- role (service_role) entirely unaffected by anything revoked here —
+-- but a stray anon-authenticated request against these tables should
+-- fail on privileges, not merely happen to match zero RLS rows.
+--
+-- `authenticated`: SELECT only, on both tables. What that does and
+-- doesn't allow, and why:
 --
 --   - SELECT: yes, on both tables — the dashboard list/detail pages
 --     (src/app/dashboard/proposals/...) read directly through the
@@ -439,13 +452,21 @@ create policy "Members can view their business's proposal line items"
 --   - DELETE: no, on either table. No delete-proposal feature exists in
 --     this phase; nothing needs it.
 --
--- The RLS policies above (select-only) already reflect this, but the
--- privileges here are the actual enforcement — RLS only ever narrows
--- what a query can see/touch among rows a role already has the
--- underlying table privilege to select/insert/update/delete at all.
+-- `service_role` (the admin client): untouched by any of the statements
+-- below — Supabase grants it broad privileges independent of anon/
+-- authenticated, which is exactly what src/lib/supabase/admin.ts
+-- already relies on.
+--
+-- The RLS policies above (select-only) already reflect the
+-- `authenticated` posture, but the privileges here are the actual
+-- enforcement — RLS only ever narrows what a query can see/touch among
+-- rows a role already has the underlying table privilege to
+-- select/insert/update/delete at all.
 
+revoke all on public.proposals from anon;
 revoke all on public.proposals from authenticated;
 grant select on public.proposals to authenticated;
 
+revoke all on public.proposal_line_items from anon;
 revoke all on public.proposal_line_items from authenticated;
 grant select on public.proposal_line_items to authenticated;
