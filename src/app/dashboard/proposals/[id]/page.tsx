@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { markProposalAsSent } from "@/lib/proposals/actions";
 import { ProposalStatusBadge } from "@/components/proposals/status-badge";
 import { CopyLinkButton } from "@/components/proposals/copy-link-button";
+import { PublicLinkField } from "@/components/proposals/public-link-field";
 import { FormMessage } from "@/components/ui/form-message";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { siteUrl } from "@/lib/site-url";
@@ -105,13 +106,7 @@ export default async function ProposalDetailPage({
           Public link
         </h2>
         <div className="flex items-center gap-2">
-          <input
-            type="text"
-            readOnly
-            value={publicUrl}
-            onFocus={(event) => event.target.select()}
-            className="block w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-          />
+          <PublicLinkField url={publicUrl} />
           <CopyLinkButton url={publicUrl} />
         </div>
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
