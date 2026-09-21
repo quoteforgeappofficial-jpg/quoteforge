@@ -1,7 +1,7 @@
 # Proposal email delivery (Phase 7)
 
 Lets a contractor send a Draft proposal to its customer by email directly
-from QuoteForge. On the proposal detail page, a Draft proposal shows a
+from Quotauna. On the proposal detail page, a Draft proposal shows a
 **Send Proposal** button (replacing the old, email-less "Mark as sent"
 button from Phase 6); on success the proposal moves to **Sent** and
 records when.
@@ -82,12 +82,12 @@ settings):
 
 ```
 RESEND_API_KEY=re_...
-PROPOSAL_EMAIL_FROM=QuoteForge Proposals <proposals@yourverifieddomain.com>
+PROPOSAL_EMAIL_FROM=Quotauna <proposals@quotauna.com>
 ```
 
 `PROPOSAL_EMAIL_FROM` must be an address on the domain you verified in
 step 1. For MVP this is one fixed sender for every business on
-QuoteForge — the contractor's own business name appears in the email's
+Quotauna — the contractor's own business name appears in the email's
 subject and body, not in the From address. Per-business custom sending
 domains are a larger feature, not implemented here.
 

@@ -1,6 +1,6 @@
-# QuoteForge
+# Quotauna
 
-QuoteForge is a SaaS application for creating and managing customer quotes,
+Quotauna is a SaaS application for creating and managing customer quotes,
 estimates, and proposals.
 
 This repository currently contains **project scaffolding plus an

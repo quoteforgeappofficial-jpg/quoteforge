@@ -1,4 +1,4 @@
-# Connecting QuoteForge to Supabase
+# Connecting Quotauna to Supabase
 
 The app's code (Supabase clients, auth pages, middleware, RLS policies) is
 already written and expects a Supabase project to exist. This doc walks
@@ -12,7 +12,7 @@ Every step that happens outside Claude Code is labeled **ANDROID ACTION**.
 **ANDROID ACTION:**
 1. In your phone's browser, go to [supabase.com](https://supabase.com) and
    sign in (or create an account).
-2. Create a new project. Pick any name (e.g. "QuoteForge") and a strong
+2. Create a new project. Pick any name (e.g. "Quotauna") and a strong
    database password — save that password somewhere safe (a password
    manager), you won't need it for this setup but it's your Postgres
    superuser password.
@@ -46,7 +46,7 @@ pass through this chat.
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `NEXT_PUBLIC_SITE_URL` — set this to your Vercel deployment URL once
-     you have one (e.g. `https://quoteforge.vercel.app`); use
+     you have one (e.g. `https://quotauna.com`); use
      `http://localhost:3000` for now if you're not deployed yet.
 3. Save. These will be available automatically the next time a session
    runs in this environment — no `.env.local` file needed for that
