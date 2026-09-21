@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "QuoteForge",
+  title: "Quotauna",
   description: "Create and manage customer quotes, estimates, and proposals.",
 };
 

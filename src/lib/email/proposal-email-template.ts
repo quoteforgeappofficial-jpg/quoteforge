@@ -75,7 +75,7 @@ export function buildProposalEmail(
               </td>
             </tr>
           </table>
-          <p style="margin:16px 0 0 0;font-size:12px;color:#a1a1aa;">Sent via QuoteForge</p>
+          <p style="margin:16px 0 0 0;font-size:12px;color:#a1a1aa;">Sent via Quotauna</p>
         </td>
       </tr>
     </table>
@@ -88,7 +88,7 @@ export function buildProposalEmail(
 View and respond to it here:
 ${input.proposalUrl}
 
-Sent via QuoteForge`;
+Sent via Quotauna`;
 
   return { subject, html, text };
 }

@@ -10,7 +10,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
             href="/"
             className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50"
           >
-            QuoteForge
+            Quotauna
           </Link>
         </div>
         {children}

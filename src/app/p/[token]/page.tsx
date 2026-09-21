@@ -113,7 +113,7 @@ export default async function PublicProposalPage({
         </div>
 
         <p className="mt-6 text-center text-xs text-zinc-400 dark:text-zinc-600">
-          Sent via QuoteForge
+          Sent via Quotauna
         </p>
       </div>
     </div>

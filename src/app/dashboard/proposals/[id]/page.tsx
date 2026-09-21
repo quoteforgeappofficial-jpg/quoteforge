@@ -111,7 +111,7 @@ export default async function ProposalDetailPage({
         </div>
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
           Anyone with this link can view the proposal and respond — no
-          QuoteForge account required. Share it directly with the customer.
+          Quotauna account required. Share it directly with the customer.
         </p>
       </div>
 

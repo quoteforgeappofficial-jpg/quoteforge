@@ -6,7 +6,7 @@ export default function Home() {
       <header className="border-b border-zinc-200 dark:border-zinc-800">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-4">
           <span className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-            QuoteForge
+            Quotauna
           </span>
           <div className="flex items-center gap-4">
             <Link
@@ -30,7 +30,7 @@ export default function Home() {
           Quotes, estimates, and proposals in one place.
         </h1>
         <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-          QuoteForge is being built to help teams create, send, and track
+          Quotauna is being built to help teams create, send, and track
           customer quotes, estimates, and proposals from a single workspace.
         </p>
         <div className="mt-10 flex items-center gap-4">
@@ -51,7 +51,7 @@ export default function Home() {
 
       <footer className="border-t border-zinc-200 px-6 py-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">
         <div className="mx-auto w-full max-w-5xl">
-          &copy; {new Date().getFullYear()} QuoteForge. All rights reserved.
+          &copy; {new Date().getFullYear()} Quotauna. All rights reserved.
         </div>
       </footer>
     </div>

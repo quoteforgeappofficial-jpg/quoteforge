@@ -37,7 +37,7 @@ export default async function DashboardLayout({
             href="/"
             className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50"
           >
-            QuoteForge
+            Quotauna
           </Link>
         </div>
         <nav className="flex flex-1 gap-1 overflow-x-auto px-3 pb-4 md:flex-col md:overflow-visible md:pb-0">
