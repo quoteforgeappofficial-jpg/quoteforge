@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { markProposalAsSent } from "@/lib/proposals/actions";
+import { sendProposalEmail } from "@/lib/proposals/send-actions";
 import { ProposalStatusBadge } from "@/components/proposals/status-badge";
 import { CopyLinkButton } from "@/components/proposals/copy-link-button";
 import { PublicLinkField } from "@/components/proposals/public-link-field";
@@ -91,8 +91,8 @@ export default async function ProposalDetailPage({
           )}
         </div>
         {proposal.status === "draft" && (
-          <form action={markProposalAsSent.bind(null, proposal.id)}>
-            <SubmitButton>Mark as sent</SubmitButton>
+          <form action={sendProposalEmail.bind(null, proposal.id)}>
+            <SubmitButton>Send Proposal</SubmitButton>
           </form>
         )}
       </div>
